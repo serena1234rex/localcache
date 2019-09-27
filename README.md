@@ -1,7 +1,7 @@
 ## Install
 
 ```
-$ go get github.com/bluele/gcache
+$ go get github.com/HoneyLiuJiaYi/localcache.git
 ```
 
 ## Example
