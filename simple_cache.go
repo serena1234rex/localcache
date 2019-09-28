@@ -2,7 +2,6 @@ package localcache
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +25,10 @@ func (c *SimpleCache) Set(key, value interface{}) error {
 		}
 	}
 	err = c.setValue(key, value)
+
+	if c.addCallback != nil {
+		c.addCallback(key, value)
+	}
 	return err
 }
 
@@ -34,8 +37,10 @@ func (c *SimpleCache) setValue(key, value interface{}) error {
 	if !ok {
 		item = &Item{}
 		c.items[key] = item
-		// 数量 + 1
-		atomic.AddInt32(&c.size, 1)
+
+		if c.isEvict() {
+			c.evict()
+		}
 	}
 
 	// 针对资源上锁，不是针对表
@@ -88,7 +93,6 @@ func (c *SimpleCache) getValue(key interface{}) (interface{}, error) {
 		// 校验是否已经过期
 		if item.IsExpire(time.Now()) {
 			delete(c.items, key)
-			atomic.AddInt32(&c.size, -1)
 			value = nil
 			// 执行过期策略
 			c.expireFunc()
@@ -127,8 +131,8 @@ func (c *SimpleCache) GetAll() map[interface{}]interface{} {
 	return items
 }
 
-func (c *SimpleCache) KeyCount() int32 {
-	return c.size
+func (c *SimpleCache) KeyCount() int {
+	return len(c.items)
 }
 
 func (c *SimpleCache) Has(key interface{}) bool {
@@ -137,6 +141,28 @@ func (c *SimpleCache) Has(key interface{}) bool {
 		return false
 	}
 	return !item.IsExpire(time.Now())
+}
+
+// 判断是否过载
+func (c *SimpleCache) isEvict() bool {
+	return (c.basicCache.capacity > 0 && len(c.items) > c.basicCache.capacity)
+}
+
+func (c *SimpleCache) evict() {
+	over := c.KeyCount() - c.basicCache.capacity
+	if over > 0 {
+		t := time.Now()
+		count := 0
+		for key,item := range c.items {
+			if item.IsExpire(t) {
+				defer c.Remove(key)
+				count++
+			}
+			if count >= over {
+				break
+			}
+		}
+	}
 }
 
 func (item *Item) IsExpire(now time.Time) bool {
@@ -152,8 +178,12 @@ func (item *Item) IsExpire(now time.Time) bool {
 
 func newSimpleCache(builder *CacheBuilder) *SimpleCache {
 	cache := &SimpleCache{}
-	cache.items = make(map[interface{}]*Item)
+	cache.init()
 
 	buildCache(&cache.basicCache, builder)
 	return cache
+}
+
+func (c *SimpleCache) init() {
+	c.items = make(map[interface{}]*Item)
 }

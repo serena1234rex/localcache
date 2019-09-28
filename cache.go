@@ -10,19 +10,19 @@ type Cache interface {
 	Get(key interface{}) (interface{}, error) // 抽取
 	Remove(key interface{}) error             // 删除
 	GetAll() map[interface{}]interface{}      // 获取所有
-	KeyCount() int32                          // key 的数量
+	KeyCount() int                            // key 的数量
 	Has(key interface{}) bool                 // 校验 key 是否存在
 }
 
 type (
-	ADDCallback     func(interface{})                      // 加入元素后的回调
+	ADDCallback     func(key, value interface{})                      // 加入元素后的回调
 	SerializeFunc   func(interface{}) (interface{}, error) // 序列化
 	DeserializeFunc func(interface{}) (interface{}, error) // 反序列化
 	ExpireFunc      func()                                 // 超时函数
 )
 
 type basicCache struct {
-	size       int32             // key 的数量
+	capacity   int               // 容量
 	expiration *time.Duration    // 过期时间
 	register   *RegisterAccessor // 计数器
 	flight     bool              // 是否启动飞行器
@@ -31,11 +31,12 @@ type basicCache struct {
 	serializeFunc   SerializeFunc
 	deserializeFunc DeserializeFunc
 	expireFunc      ExpireFunc
+	addCallback 	ADDCallback
 }
 
 // 组织器
 type CacheBuilder struct {
-	size            int32
+	capacity        int
 	mu              sync.RWMutex
 	serializeFunc   SerializeFunc
 	deserializeFunc DeserializeFunc
@@ -44,13 +45,14 @@ type CacheBuilder struct {
 	expiration      *time.Duration
 	flight          bool
 	register        *RegisterAccessor // 计数器
+	addCallback 	ADDCallback
 }
 
 // 创建一个构造器
 func Create() *CacheBuilder {
 	return &CacheBuilder{
-		size: 0,
-		tp:   SIMPLE,
+		capacity: -1,
+		tp:       SIMPLE,
 	}
 }
 
@@ -71,6 +73,11 @@ func (builder *CacheBuilder) Tp(tp string) *CacheBuilder {
 	return builder
 }
 
+func (builder *CacheBuilder) AddCallback(fc ADDCallback) *CacheBuilder {
+	builder.addCallback = fc
+	return builder
+}
+
 func (builder *CacheBuilder) ExpireFunc(fc ExpireFunc) *CacheBuilder {
 	builder.expireFunc = fc
 	return builder
@@ -78,6 +85,12 @@ func (builder *CacheBuilder) ExpireFunc(fc ExpireFunc) *CacheBuilder {
 
 func (builder *CacheBuilder) SetDuration(duration time.Duration) *CacheBuilder {
 	builder.expiration = &duration
+	return builder
+}
+
+// 设置容量
+func (builder *CacheBuilder) Capacity(capacity int) *CacheBuilder {
+	builder.capacity = capacity
 	return builder
 }
 
@@ -100,8 +113,9 @@ func buildCache(c *basicCache, cb *CacheBuilder) {
 	c.serializeFunc = cb.serializeFunc
 	c.expireFunc = cb.expireFunc
 	c.serializeFunc = cb.serializeFunc
-	c.size = cb.size
+	c.capacity = cb.capacity
 	c.expiration = cb.expiration
 	c.flight = cb.flight
 	c.register = cb.register
+	c.addCallback = cb.addCallback
 }
