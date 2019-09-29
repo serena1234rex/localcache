@@ -7,7 +7,8 @@ import (
 
 type SimpleCache struct {
 	basicCache
-	items map[interface{}]*Item
+	threshold int // the threshold of map capacity
+	items    map[interface{}]*Item
 }
 
 type Item struct {
@@ -33,23 +34,24 @@ func (c *SimpleCache) Set(key, value interface{}) error {
 }
 
 func (c *SimpleCache) setValue(key, value interface{}) error {
-	item, ok := c.items[key];
+	item, ok := c.items[key]
 	if !ok {
 		item = &Item{}
 		c.items[key] = item
 
-		if c.isEvict() {
-			c.evict()
+		// if count of key exceed threshold and expand the capacity
+		if c.KeyCount() > c.threshold {
+			c.expandCapacity()
 		}
 	}
 
-	// 针对资源上锁，不是针对表
+	// lock resource instead of  map
 	item.mu.Lock()
 	defer item.mu.Unlock()
 
 	item.value = value
-	if c.basicCache.expiration != nil {
-		item.SetExpire(*c.expiration)
+	if c.basicCache.duration != nil {
+		item.SetExpire(*c.duration)
 	}
 
 	return nil
@@ -143,28 +145,7 @@ func (c *SimpleCache) Has(key interface{}) bool {
 	return !item.IsExpire(time.Now())
 }
 
-// 判断是否过载
-func (c *SimpleCache) isEvict() bool {
-	return (c.basicCache.capacity > 0 && len(c.items) > c.basicCache.capacity)
-}
-
-func (c *SimpleCache) evict() {
-	over := c.KeyCount() - c.basicCache.capacity
-	if over > 0 {
-		t := time.Now()
-		count := 0
-		for key,item := range c.items {
-			if item.IsExpire(t) {
-				defer c.Remove(key)
-				count++
-			}
-			if count >= over {
-				break
-			}
-		}
-	}
-}
-
+// 判断是否超时
 func (item *Item) IsExpire(now time.Time) bool {
 	if item.expiration == nil {
 		return false
@@ -176,14 +157,34 @@ func (item *Item) IsExpire(now time.Time) bool {
 	return item.expiration.Before(now)
 }
 
+// expand map capacity
+func (c *SimpleCache) expandCapacity() {
+	newCapacity := c.capacity << 1
+	c.capacity = newCapacity
+	c.calculateThreshold()
+
+	newMap := make(map[interface{}]*Item, c.capacity)
+	for key, value := range c.items {
+		newMap[key] = value
+	}
+	c.mu.Lock()
+	c.items = newMap
+	c.mu.Unlock()
+}
+
 func newSimpleCache(builder *CacheBuilder) *SimpleCache {
 	cache := &SimpleCache{}
-	cache.init()
-
 	buildCache(&cache.basicCache, builder)
+
+	cache.init()
 	return cache
 }
 
 func (c *SimpleCache) init() {
-	c.items = make(map[interface{}]*Item)
+	c.items = make(map[interface{}]*Item, c.capacity)
+	c.calculateThreshold()
+}
+
+func (c *SimpleCache) calculateThreshold() {
+	c.threshold = c.capacity * 3 / 4 // 0.75
 }

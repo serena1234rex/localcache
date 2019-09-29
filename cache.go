@@ -1,6 +1,7 @@
 package localcache
 
 import (
+	"errors"
 	"sync"
 	"time"
 )
@@ -15,23 +16,23 @@ type Cache interface {
 }
 
 type (
-	ADDCallback     func(key, value interface{})                      // 加入元素后的回调
+	ADDCallback     func(key, value interface{})           // 加入元素后的回调
 	SerializeFunc   func(interface{}) (interface{}, error) // 序列化
 	DeserializeFunc func(interface{}) (interface{}, error) // 反序列化
 	ExpireFunc      func()                                 // 超时函数
 )
 
 type basicCache struct {
-	capacity   int               // 容量
-	expiration *time.Duration    // 过期时间
-	register   *RegisterAccessor // 计数器
-	flight     bool              // 是否启动飞行器
-	mu         sync.RWMutex
+	capacity int               // 容量
+	duration *time.Duration    // 过期时间
+	register *RegisterAccessor // 计数器
+	flight   bool              // 是否启动飞行器
+	mu       sync.RWMutex
 
 	serializeFunc   SerializeFunc
 	deserializeFunc DeserializeFunc
 	expireFunc      ExpireFunc
-	addCallback 	ADDCallback
+	addCallback     ADDCallback
 }
 
 // 组织器
@@ -42,16 +43,18 @@ type CacheBuilder struct {
 	deserializeFunc DeserializeFunc
 	expireFunc      ExpireFunc
 	tp              string
-	expiration      *time.Duration
+	duration        *time.Duration
 	flight          bool
 	register        *RegisterAccessor // 计数器
-	addCallback 	ADDCallback
+	addCallback     ADDCallback
 }
+
+var KeyNotFoundError = errors.New("key not found .")
 
 // 创建一个构造器
 func Create() *CacheBuilder {
 	return &CacheBuilder{
-		capacity: -1,
+		capacity: 100, // default capacity is 100
 		tp:       SIMPLE,
 	}
 }
@@ -84,7 +87,7 @@ func (builder *CacheBuilder) ExpireFunc(fc ExpireFunc) *CacheBuilder {
 }
 
 func (builder *CacheBuilder) SetDuration(duration time.Duration) *CacheBuilder {
-	builder.expiration = &duration
+	builder.duration = &duration
 	return builder
 }
 
@@ -104,6 +107,8 @@ func (builder *CacheBuilder) OpenFlight(r *RegisterAccessor) *CacheBuilder {
 func (builder *CacheBuilder) Build() Cache {
 	if builder.tp == SIMPLE {
 		return newSimpleCache(builder)
+	} else if builder.tp == LRU {
+		return newLRUCache(builder)
 	}
 	return nil
 }
@@ -114,7 +119,7 @@ func buildCache(c *basicCache, cb *CacheBuilder) {
 	c.expireFunc = cb.expireFunc
 	c.serializeFunc = cb.serializeFunc
 	c.capacity = cb.capacity
-	c.expiration = cb.expiration
+	c.duration = cb.duration
 	c.flight = cb.flight
 	c.register = cb.register
 	c.addCallback = cb.addCallback

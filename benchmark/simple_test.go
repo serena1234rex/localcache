@@ -21,6 +21,20 @@ func TestSimple(t *testing.T) {
 	fmt.Println(value)
 }
 
+func TestLRU(t *testing.T) {
+	cache := localcache.Create().
+		Tp(localcache.LRU).
+		Capacity(2).
+		Build()
+
+	cache.Set("key", "aaaaa")
+	cache.Set("akey", "bbbb")
+	cache.Set("bkey", "ccccc")
+
+	value, _ := cache.Get("key")
+	fmt.Println(value)
+}
+
 func TestGetAll(t *testing.T) {
 	cache := localcache.Create().
 		Tp(localcache.SIMPLE).
